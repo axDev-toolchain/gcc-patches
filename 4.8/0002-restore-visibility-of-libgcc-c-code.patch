@@ -1,0 +1,10 @@
+--- gcc/libgcc/config/arm/bpabi-lib.h.bero	2013-05-09 01:51:25.609711895 +0200
++++ gcc/libgcc/config/arm/bpabi-lib.h	2013-05-09 01:51:37.330565364 +0200
+@@ -22,6 +22,7 @@
+ /* Make __aeabi_AEABI_NAME an alias for __GCC_NAME.  */
+ #define RENAME_LIBRARY(GCC_NAME, AEABI_NAME)		\
+   typeof (__##GCC_NAME) __aeabi_##AEABI_NAME \
++    __attribute__((visibility("default"))) \
+     __attribute__((alias ("__" #GCC_NAME)));
+ 
+ /* Give some libgcc functions an additional __aeabi name.  */
