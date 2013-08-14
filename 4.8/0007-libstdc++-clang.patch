@@ -1,0 +1,26 @@
+commit 0e1e4c378ef579441c3815c6213422f1df530f9b
+Author: Andrew Hsieh <andrewhsieh@google.com>
+Date:   Tue Apr 2 19:40:11 2013 +0800
+
+    [4.8] Patch GCC libstdc++ to work with Clang in C++11
+    
+    See http://clang.llvm.org/cxx_status.html
+        http://code.google.com/p/android/issues/detail?id=39600
+        https://android-review.googlesource.com/#/c/47836/
+        1e4edc8addf7fc21d821e64cc81d85315561bcd9
+    
+    Change-Id: Ibbc2ed2bf665bbdd9529e6d962312b10a0da320f
+
+diff --git gcc-4.8/libstdc++-v3/include/std/type_traits gcc-4.8/libstdc++-v3/include/std/type_traits
+index 334b8d0..97f8baf 100644
+--- gcc-4.8/libstdc++-v3/include/std/type_traits
++++ gcc-4.8/libstdc++-v3/include/std/type_traits
+@@ -1806,7 +1806,7 @@ _GLIBCXX_BEGIN_NAMESPACE_VERSION
+     struct __common_type_impl
+     : private __do_common_type_impl
+     {
+-      typedef decltype(_S_test<_Tp, _Up>(0)) type;
++      typedef typename decay<decltype(_S_test<_Tp, _Up>(0))>::type type;
+     };
+ 
+   struct __do_member_type_wrapper

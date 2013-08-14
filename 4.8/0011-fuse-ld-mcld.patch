@@ -1,0 +1,84 @@
+From 06b207c97dfb0d70f1f2ef91b93b665dceae0d27 Mon Sep 17 00:00:00 2001
+From: Andrew Hsieh <andrewhsieh@google.com>
+Date: Tue, 2 Apr 2013 19:50:14 +0800
+Subject: [PATCH] [4.8] Add mclinker support: -fuse-ld=mcld
+
+See http://code.google.com/p/mclinker/
+    6502f082fed932c0609b475d5d6917103700e5a8
+
+Change-Id: I3c782584f43a8216d868e016d5f416a574402702
+---
+ gcc-4.8/gcc/collect2.c      | 6 +++++-
+ gcc-4.8/gcc/doc/invoke.texi | 3 +++
+ gcc-4.8/gcc/gcc.c           | 2 +-
+ 3 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git gcc-4.8/gcc/collect2.c gcc-4.8/gcc/collect2.c
+index 99dd41d..dc094ed 100644
+--- gcc-4.8/gcc/collect2.c
++++ gcc-4.8/gcc/collect2.c
+@@ -846,6 +846,7 @@ main (int argc, char **argv)
+       USE_PLUGIN_LD,
+       USE_GOLD_LD,
+       USE_BFD_LD,
++      USE_MCLD_LD,
+       USE_LD_MAX
+     } selected_linker = USE_DEFAULT_LD;
+   static const char *const ld_suffixes[USE_LD_MAX] =
+@@ -854,6 +855,7 @@ main (int argc, char **argv)
+       PLUGIN_LD_SUFFIX,
+       "ld.gold",
+-      "ld.bfd"
++      "ld.bfd",
++      "ld.mcld"
+     };
+   static const char *const real_ld_suffix = "real-ld";
+   static const char *const collect_ld_suffix = "collect-ld";
+@@ -1020,6 +1022,8 @@ main (int argc, char **argv)
+ 	  selected_linker = USE_BFD_LD;
+ 	else if (strcmp (argv[i], "-fuse-ld=gold") == 0)
+ 	  selected_linker = USE_GOLD_LD;
++	else if (strcmp (argv[i], "-fuse-ld=mcld") == 0)
++	  selected_linker = USE_MCLD_LD;
+ 
+ #ifdef COLLECT_EXPORT_LIST
+ 	/* These flags are position independent, although their order
+@@ -1288,7 +1292,7 @@ main (int argc, char **argv)
+ 	      else if (!use_collect_ld
+ 		       && strncmp (arg, "-fuse-ld=", 9) == 0)
+ 		{
+-		  /* Do not pass -fuse-ld={bfd|gold} to the linker. */
++		  /* Do not pass -fuse-ld={bfd|gold|mcld} to the linker. */
+ 		  ld1--;
+ 		  ld2--;
+ 		}
+diff --git gcc-4.8/gcc/doc/invoke.texi gcc-4.8/gcc/doc/invoke.texi
+index 9273d7d..6ef6039 100644
+--- gcc-4.8/gcc/doc/invoke.texi
++++ gcc-4.8/gcc/doc/invoke.texi
+@@ -8437,6 +8437,9 @@ Use the @command{bfd} linker instead of the default linker.
+ @item -fuse-ld=gold
+ Use the @command{gold} linker instead of the default linker.
+ 
++@item -fuse-ld=mcld
++Use the @command{mcld} linker instead of the default linker.
++
+ @item -fcprop-registers
+ @opindex fcprop-registers
+ After register allocation and post-register allocation instruction splitting,
+diff --git gcc-4.8/gcc/gcc.c gcc-4.8/gcc/gcc.c
+index 86077f8..f0b946e 100644
+--- gcc-4.8/gcc/gcc.c
++++ gcc-4.8/gcc/gcc.c
+@@ -537,7 +537,7 @@ proper position among the other output files.  */
+    shared library ordering, and we keep the wrapper function in
+    libgcc.  This is not yet a real spec, though it could become one;
+    it is currently just stuffed into LINK_SPEC.  FIXME: This wrapping
+-   only works with GNU ld and gold.  FIXME: This is incompatible with
++   only works with GNU ld, gold and mcld.  FIXME: This is incompatible with
+    -fmudflap when linking statically, which wants to do its own
+    wrapping.  */
+ #define STACK_SPLIT_SPEC " %{fsplit-stack: --wrap=pthread_create}"
+-- 
+1.8.3.2
+

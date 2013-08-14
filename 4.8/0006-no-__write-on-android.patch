@@ -1,0 +1,31 @@
+commit 18f0873ec950f1496e55c2bd68b9debd1b0bb4ce
+Author: Andrew Hsieh <andrewhsieh@google.com>
+Date:   Tue Apr 2 19:38:54 2013 +0800
+
+    [4.8] Fix ARM GCC fail to links code using 64-bit atomic built-in
+    
+    For ARM w/o dmb a helper function is called for 64-bit atomic
+    built-in, which call __write when helper version is too old.
+    Change to call write instead for Android.
+    
+    See http://code.google.com/p/android/issues/detail?id=41297
+    e42abc641966570528522d61ba625e926e979ac7
+    
+    Change-Id: I15498b73eebdbd5f4d62aafa943290ca341378bb
+
+diff --git gcc-4.8/libgcc/config/arm/linux-atomic-64bit.c gcc-4.8/libgcc/config/arm/linux-atomic-64bit.c
+index 7aa8dfc..1f82472 100644
+--- gcc-4.8/libgcc/config/arm/linux-atomic-64bit.c
++++ gcc-4.8/libgcc/config/arm/linux-atomic-64bit.c
+@@ -56,7 +56,11 @@ static void __check_for_sync8_kernelhelper (void)
+ 	 for the user - I'm not sure I can rely on much else being
+ 	 available at this point, so do the same as generic-morestack.c
+ 	 write () and abort ().  */
++#if !defined(__ANDROID__)
+       __write (2 /* stderr.  */, err, sizeof (err));
++#else
++      write (2 /* stderr.  */, err, sizeof (err));
++#endif
+       abort ();
+     }
+ };

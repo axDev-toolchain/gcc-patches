@@ -1,0 +1,39 @@
+commit f50a81165e305c7339bec78bd3c9cf8a35e1f233
+Author: Andrew Hsieh <andrewhsieh@google.com>
+Date:   Tue Apr 2 19:47:45 2013 +0800
+
+    [4.8] Disable libstdc versioning
+    
+    Used to be first half of NDK local patch at $NDK/build/tools/
+    toolchain-patches/gcc/0006-Disable-libstdc-versioning.patch
+    
+    See 4a0927423d51f594b870e58b3eb51574327f8b0e
+    
+    Change-Id: Ifc8efb661c5b4175feb1654fbc79525e1bc7f713
+
+diff --git gcc-4.8/libstdc++-v3/src/Makefile.am gcc-4.8/libstdc++-v3/src/Makefile.am
+index 267a3db..467c61c 100644
+--- gcc-4.8/libstdc++-v3/src/Makefile.am
++++ gcc-4.8/libstdc++-v3/src/Makefile.am
+@@ -67,7 +67,7 @@ libstdc___la_DEPENDENCIES = \
+ 	$(top_builddir)/src/c++11/libc++11convenience.la
+ 
+ libstdc___la_LDFLAGS = \
+-	-version-info $(libtool_VERSION) ${version_arg} -lm
++	-avoid-version ${version_arg} -lm
+ 
+ libstdc___la_LINK = $(CXXLINK) $(libstdc___la_LDFLAGS)
+ 
+diff --git gcc-4.8/libstdc++-v3/src/Makefile.in gcc-4.8/libstdc++-v3/src/Makefile.in
+index 69001b4..25c46fc 100644
+--- gcc-4.8/libstdc++-v3/src/Makefile.in
++++ gcc-4.8/libstdc++-v3/src/Makefile.in
+@@ -367,7 +367,7 @@ libstdc___la_DEPENDENCIES = \
+ 	$(top_builddir)/src/c++11/libc++11convenience.la
+ 
+ libstdc___la_LDFLAGS = \
+-	-version-info $(libtool_VERSION) ${version_arg} -lm
++	-avoid-version ${version_arg} -lm
+ 
+ libstdc___la_LINK = $(CXXLINK) $(libstdc___la_LDFLAGS)
+ 

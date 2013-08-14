@@ -1,0 +1,197 @@
+commit c27bd5a265e6aeecefa6bfebe52fcf26b08298cd
+Author: Andrew Hsieh <andrewhsieh@google.com>
+Date:   Tue Apr 2 19:46:23 2013 +0800
+
+    [4.8] Support OpenMP
+    
+    See b6e375800c9a2f02a732cbdf5e87a860c3d954e1,
+    1271761f530c0050154e8d526b95f952df551751,
+    92c478dba755a1a2f6f00ff390666acbffd41982 and
+    51df2e98d22e2c6f5d2a16860bc8fc3644179c1d.
+    
+    Change-Id: I7b01524a5516dd31b26a68cccc616a066893db39
+
+diff --git gcc-4.8/gcc/config/arm/linux-eabi.h gcc-4.8/gcc/config/arm/linux-eabi.h
+index 305d7cb..adea490 100644
+--- gcc-4.8/gcc/config/arm/linux-eabi.h
++++ gcc-4.8/gcc/config/arm/linux-eabi.h
+@@ -100,7 +100,7 @@
+ #undef  LIB_SPEC
+ #define LIB_SPEC							\
+   LINUX_OR_ANDROID_LD (GNU_USER_TARGET_LIB_SPEC,			\
+-		       GNU_USER_TARGET_LIB_SPEC " " ANDROID_LIB_SPEC)
++		       GNU_USER_TARGET_LIB_SPEC_LESS_PTHREAD " " ANDROID_LIB_SPEC)
+ 
+ #undef	STARTFILE_SPEC
+ #define STARTFILE_SPEC \
+diff --git gcc-4.8/gcc/config/gnu-user.h gcc-4.8/gcc/config/gnu-user.h
+index bcdf0e6..a924fce 100644
+--- gcc-4.8/gcc/config/gnu-user.h
++++ gcc-4.8/gcc/config/gnu-user.h
+@@ -73,10 +73,14 @@ see the files COPYING3 and COPYING.RUNTIME respectively.  If not, see
+ #undef CPLUSPLUS_CPP_SPEC
+ #define CPLUSPLUS_CPP_SPEC "-D_GNU_SOURCE %(cpp)"
+ 
+-#define GNU_USER_TARGET_LIB_SPEC \
+-  "%{pthread:-lpthread} \
+-   %{shared:-lc} \
++#define GNU_USER_TARGET_LIB_SPEC_LESS_PTHREAD \
++   "%{shared:-lc} \
+    %{!shared:%{mieee-fp:-lieee} %{profile:-lc_p}%{!profile:-lc}}"
++
++#define GNU_USER_TARGET_LIB_SPEC \
++  "%{pthread:-lpthread} "\
++  GNU_USER_TARGET_LIB_SPEC_LESS_PTHREAD
++
+ #undef  LIB_SPEC
+ #define LIB_SPEC GNU_USER_TARGET_LIB_SPEC
+ 
+diff --git gcc-4.8/gcc/config/i386/linux-common.h gcc-4.8/gcc/config/i386/linux-common.h
+index 731a5bd..51e25b4 100644
+--- gcc-4.8/gcc/config/i386/linux-common.h
++++ gcc-4.8/gcc/config/i386/linux-common.h
+@@ -47,7 +47,7 @@ along with GCC; see the file COPYING3.  If not see
+ #undef  LIB_SPEC
+ #define LIB_SPEC \
+   LINUX_OR_ANDROID_LD (GNU_USER_TARGET_LIB_SPEC, \
+-		       GNU_USER_TARGET_LIB_SPEC " " ANDROID_LIB_SPEC)
++		       GNU_USER_TARGET_LIB_SPEC_LESS_PTHREAD " " ANDROID_LIB_SPEC)
+ 
+ #undef  STARTFILE_SPEC
+ #define STARTFILE_SPEC \
+diff --git gcc-4.8/gcc/config/linux-android.h gcc-4.8/gcc/config/linux-android.h
+index a82c3f0..87957e3 100644
+--- gcc-4.8/gcc/config/linux-android.h
++++ gcc-4.8/gcc/config/linux-android.h
+@@ -52,7 +52,8 @@
+   "%{!frtti:%{!fno-rtti: -fno-rtti}}"
+ 
+ #define ANDROID_LIB_SPEC \
+-  "%{!static: -ldl}"
++  "%{!static: -ldl} \
++  %{pthread: -lc}"
+ 
+ #define ANDROID_STARTFILE_SPEC						\
+   "%{shared: crtbegin_so%O%s;:"						\
+diff --git gcc-4.8/gcc/config/mips/linux-common.h gcc-4.8/gcc/config/mips/linux-common.h
+index a8965b7..8b9e4b0 100644
+--- gcc-4.8/gcc/config/mips/linux-common.h
++++ gcc-4.8/gcc/config/mips/linux-common.h
+@@ -44,7 +44,7 @@ along with GCC; see the file COPYING3.  If not see
+ #undef  LIB_SPEC
+ #define LIB_SPEC							\
+   LINUX_OR_ANDROID_LD (GNU_USER_TARGET_LIB_SPEC,			\
+-		       GNU_USER_TARGET_LIB_SPEC " " ANDROID_LIB_SPEC)
++		       GNU_USER_TARGET_LIB_SPEC_LESS_PTHREAD " " ANDROID_LIB_SPEC)
+ 
+ #undef  STARTFILE_SPEC
+ #define STARTFILE_SPEC							\
+diff --git gcc-4.8/libgomp/configure gcc-4.8/libgomp/configure
+index 238b1af..27235f7 100755
+--- gcc-4.8/libgomp/configure
++++ gcc-4.8/libgomp/configure
+@@ -15022,7 +15022,54 @@ _ACEOF
+ if ac_fn_c_try_link "$LINENO"; then :
+   XPCFLAGS=" -Wc,-pthread"
+ else
+-  CFLAGS="$save_CFLAGS" LIBS="-lpthread $LIBS"
++  echo "$as_me: failed program was:" >&5
++sed 's/^/| /' conftest.$ac_ext >&5
++
++CFLAGS="$save_CFLAGS" LIBS="$LIBS"
++  cat >conftest.$ac_ext <<_ACEOF
++/* confdefs.h.  */
++_ACEOF
++cat confdefs.h >>conftest.$ac_ext
++cat >>conftest.$ac_ext <<_ACEOF
++/* end confdefs.h.  */
++#include <pthread.h>
++     void *g(void *d) { return NULL; }
++int
++main ()
++{
++pthread_t t; pthread_create(&t,NULL,g,NULL);
++  ;
++  return 0;
++}
++_ACEOF
++rm -f conftest.$ac_objext conftest$ac_exeext
++if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
++  (eval $ac_link) 2>conftest.er1
++  ac_status=$?
++  grep -v '^ *+' conftest.er1 >conftest.err
++  rm -f conftest.er1
++  cat conftest.err >&5
++  echo "$as_me:$LINENO: \$? = $ac_status" >&5
++  (exit $ac_status); } &&
++	 { ac_try='test -z "$ac_c_werror_flag"
++			 || test ! -s conftest.err'
++  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
++  (eval $ac_try) 2>&5
++  ac_status=$?
++  echo "$as_me:$LINENO: \$? = $ac_status" >&5
++  (exit $ac_status); }; } &&
++	 { ac_try='test -s conftest$ac_exeext'
++  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
++  (eval $ac_try) 2>&5
++  ac_status=$?
++  echo "$as_me:$LINENO: \$? = $ac_status" >&5
++  (exit $ac_status); }; }; then
++  :
++else
++  echo "$as_me: failed program was:" >&5
++sed 's/^/| /' conftest.$ac_ext >&5
++
++CFLAGS="$save_CFLAGS" LIBS="-lpthread $LIBS"
+   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+ /* end confdefs.h.  */
+ #include <pthread.h>
+@@ -15045,6 +15092,9 @@ rm -f core conftest.err conftest.$ac_objext \
+ fi
+ rm -f core conftest.err conftest.$ac_objext \
+     conftest$ac_exeext conftest.$ac_ext
++fi
++rm -f core conftest.err conftest.$ac_objext \
++    conftest$ac_exeext conftest.$ac_ext
+ 
+ # Check for functions needed.
+ for ac_func in getloadavg clock_gettime strtoull
+diff --git gcc-4.8/libgomp/configure.ac gcc-4.8/libgomp/configure.ac
+index d87ed29..292db2a 100644
+--- gcc-4.8/libgomp/configure.ac
++++ gcc-4.8/libgomp/configure.ac
+@@ -184,6 +184,13 @@ AC_LINK_IFELSE(
+    void *g(void *d) { return NULL; }],
+   [pthread_t t; pthread_create(&t,NULL,g,NULL);])],
+  [XPCFLAGS=" -Wc,-pthread"],
++ [CFLAGS="$save_CFLAGS" LIBS="$LIBS"
++  AC_LINK_IFELSE(
++   [AC_LANG_PROGRAM(
++    [#include <pthread.h>
++     void *g(void *d) { return NULL; }],
++    [pthread_t t; pthread_create(&t,NULL,g,NULL);])],
++   [],
+  [CFLAGS="$save_CFLAGS" LIBS="-lpthread $LIBS"
+   AC_LINK_IFELSE(
+    [AC_LANG_PROGRAM(
+@@ -191,7 +198,7 @@ AC_LINK_IFELSE(
+      void *g(void *d) { return NULL; }],
+     [pthread_t t; pthread_create(&t,NULL,g,NULL);])],
+    [],
+-   [AC_MSG_ERROR([Pthreads are required to build libgomp])])])
++   [AC_MSG_ERROR([Pthreads are required to build libgomp])])])])
+ 
+ # Check for functions needed.
+ AC_CHECK_FUNCS(getloadavg clock_gettime strtoull)
+diff --git gcc-4.8/libgomp/env.c gcc-4.8/libgomp/env.c
+index 65cbba8..68b92f2 100644
+--- gcc-4.8/libgomp/env.c
++++ gcc-4.8/libgomp/env.c
+@@ -43,6 +43,7 @@
+ #endif
+ #include <limits.h>
+ #include <errno.h>
++#include <asm/page.h>
+ 
+ #ifndef HAVE_STRTOULL
+ # define strtoull(ptr, eptr, base) strtoul (ptr, eptr, base)

@@ -1,0 +1,116 @@
+From d88e126b2b303c95d94b939c21f8672637871dbd Mon Sep 17 00:00:00 2001
+From: Andrew Hsieh <andrewhsieh@google.com>
+Date: Tue, 2 Apr 2013 19:58:37 +0800
+Subject: [PATCH] [4.8] Fix openmp support to use libgomp/config/linux
+
+See a38e7b29885b25278b1d356b2efd21622376695d
+
+Change-Id: I4e2671ea3aa8a67e9b5c6d5974b7486eb7ae54b7
+---
+ gcc-4.8/libgomp/config/linux/futex.h      |  4 ++++
+ gcc-4.8/libgomp/config/linux/mips/futex.h |  5 +++++
+ gcc-4.8/libgomp/config/linux/proc.c       | 10 +++++++---
+ gcc-4.8/libgomp/configure                 | 12 ++++++++++++
+ 4 files changed, 28 insertions(+), 3 deletions(-)
+
+diff --git gcc-4.8/libgomp/config/linux/futex.h gcc-4.8/libgomp/config/linux/futex.h
+index fecaa9f..676b2db 100644
+--- gcc-4.8/libgomp/config/linux/futex.h
++++ gcc-4.8/libgomp/config/linux/futex.h
+@@ -38,6 +38,10 @@
+ 
+ #pragma GCC visibility pop
+ 
++#if !defined(SYS_futex)
++#define SYS_futex __NR_futex
++#endif
++
+ static inline void
+ futex_wait (int *addr, int val)
+ {
+diff --git gcc-4.8/libgomp/config/linux/mips/futex.h gcc-4.8/libgomp/config/linux/mips/futex.h
+index fa5aa26..3140336 100644
+--- gcc-4.8/libgomp/config/linux/mips/futex.h
++++ gcc-4.8/libgomp/config/linux/mips/futex.h
+@@ -25,6 +25,11 @@
+ /* Provide target-specific access to the futex system call.  */
+ 
+ #include <sys/syscall.h>
++
++#if !defined(SYS_futex)
++#define SYS_futex __NR_futex
++#endif
++
+ #define FUTEX_WAIT 0
+ #define FUTEX_WAKE 1
+ 
+diff --git gcc-4.8/libgomp/config/linux/proc.c gcc-4.8/libgomp/config/linux/proc.c
+index d13b081..4572308 100644
+--- gcc-4.8/libgomp/config/linux/proc.c
++++ gcc-4.8/libgomp/config/linux/proc.c
+@@ -234,7 +234,7 @@ sc_nprocessors_actu ()
+ 
+     if (buffer_len < 0)  /* should not happen */ {
+         fprintf(stderr,"Could not find %s: %s\n", file_name, strerror(errno));
+-        return;
++        return 1;
+     }
+ 
+     /* Count the CPU cores, the value may be 0 for single-core CPUs */
+@@ -264,8 +264,10 @@ gomp_init_num_threads (void)
+       return;
+     }
+ #endif
+-#ifdef _SC_NPROCESSORS_ONLN
++#if defined(__ANDROID__)
+   gomp_global_icv.nthreads_var = sc_nprocessors_actu ();
++#elif defined(_SC_NPROCESSORS_ONLN)
++  gomp_global_icv.nthreads_var = sysconf (_SC_NPROCESSORS_ONLN);
+ #endif
+ }
+ 
+@@ -296,8 +298,10 @@ get_num_procs (void)
+       return gomp_available_cpus;
+     }
+ #endif
+-#ifdef _SC_NPROCESSORS_ONLN
++#if defined(__ANDROID__)
+   return sc_nprocessors_actu ();
++#elif defined(_SC_NPROCESSORS_ONLN)
++  return sysconf (_SC_NPROCESSORS_ONLN);
+ #else
+   return gomp_icv (false)->nthreads_var;
+ #endif
+diff --git gcc-4.8/libgomp/configure gcc-4.8/libgomp/configure
+index 27235f7..b48979b 100755
+--- gcc-4.8/libgomp/configure
++++ gcc-4.8/libgomp/configure
+@@ -15149,6 +15149,12 @@ case "$target" in
+ /* end confdefs.h.  */
+ #include <sys/syscall.h>
+ 	   int lk;
++#if !defined(SYS_gettid)
++#define SYS_gettid __NR_gettid
++#endif
++#if !defined(SYS_futex)
++#define SYS_futex __NR_futex
++#endif
+ int
+ main ()
+ {
+@@ -15201,6 +15207,12 @@ rm -f core conftest.err conftest.$ac_objext \
+ /* end confdefs.h.  */
+ #include <sys/syscall.h>
+ 	   int lk;
++#if !defined(SYS_gettid)
++#define SYS_gettid __NR_gettid
++#endif
++#if !defined(SYS_futex)
++#define SYS_futex __NR_futex
++#endif
+ int
+ main ()
+ {
+-- 
+1.8.3.2
+

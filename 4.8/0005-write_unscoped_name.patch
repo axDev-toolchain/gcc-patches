@@ -1,0 +1,25 @@
+commit 5e96f54d8c7a2cf95f1902a4d5a79e7962232c3a
+Author: Andrew Hsieh <andrewhsieh@google.com>
+Date:   Tue Apr 2 18:38:35 2013 +0800
+
+    [4.8] Fix crash on null context in cp/mangle.c::write_unscoped_name
+    
+    See related CL:
+      a22b5261da70bebfad7c6f4e948501e293db172d for GCC 4.7
+      737fc2a978ff2364d91e634a6b990979df60058f for GCC 4.6
+    
+    Change-Id: Ic5c924fa61bd839270d0218bf5f6f25d1ace8422
+
+diff --git gcc-4.8/gcc/cp/mangle.c gcc-4.8/gcc/cp/mangle.c
+index a48d476..7210571 100644
+--- gcc-4.8/gcc/cp/mangle.c
++++ gcc-4.8/gcc/cp/mangle.c
+@@ -881,7 +881,7 @@ write_unscoped_name (const tree decl)
+       /* If not, it should be either in the global namespace, or directly
+ 	 in a local function scope.  */
+       gcc_assert (context == global_namespace
+-		  || context != NULL
++		  || context == NULL
+ 		  || TREE_CODE (context) == FUNCTION_DECL);
+ 
+       write_unqualified_name (decl);

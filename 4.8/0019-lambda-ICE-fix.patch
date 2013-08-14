@@ -1,0 +1,68 @@
+From 15ba1ff9c0885836175afdcd03701e5a3e514ae1 Mon Sep 17 00:00:00 2001
+From: Alexander Ivchenko <alexander.ivchenko@intel.com>
+Date: Tue, 30 Jul 2013 15:19:17 +0400
+Subject: [PATCH] [4.8] Fix ICE on g++.dg/cpp0x/lambda/lambda-defarg3.C.
+
+      Backport the fix in r201317
+
+      2013-07-29  Jason Merrill  <jason@redhat.com>
+
+      * mangle.c (write_name): Check for null context.
+      (write_unscoped_name): Allow PARM_DECL context.
+
+Change-Id: I4f1e9c2ddc01766818562648b6e905ef33c0de50
+Signed-off-by: Alexander Ivchenko <alexander.ivchenko@intel.com>
+---
+ gcc-4.8/gcc/cp/mangle.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git gcc-4.8/gcc/cp/mangle.c gcc-4.8/gcc/cp/mangle.c
+index 7210571..da46460 100644
+--- gcc-4.8/gcc/cp/mangle.c
++++ gcc-4.8/gcc/cp/mangle.c
+@@ -794,13 +794,14 @@ write_name (tree decl, const int ignore_local_scope)
+ 
+   context = decl_mangling_context (decl);
+ 
++  gcc_assert (context != NULL_TREE);
++
+   /* A decl in :: or ::std scope is treated specially.  The former is
+      mangled using <unscoped-name> or <unscoped-template-name>, the
+      latter with a special substitution.  Also, a name that is
+      directly in a local function scope is also mangled with
+      <unscoped-name> rather than a full <nested-name>.  */
+-  if (context == NULL
+-      || context == global_namespace
++  if (context == global_namespace
+       || DECL_NAMESPACE_STD_P (context)
+       || (ignore_local_scope
+ 	  && (TREE_CODE (context) == FUNCTION_DECL
+@@ -833,10 +834,10 @@ write_name (tree decl, const int ignore_local_scope)
+ 	     directly in that function's scope, either decl or one of
+ 	     its enclosing scopes.  */
+ 	  tree local_entity = decl;
+-	  while (context != NULL && context != global_namespace)
++	  while (context != global_namespace)
+ 	    {
+ 	      /* Make sure we're always dealing with decls.  */
+-	      if (context != NULL && TYPE_P (context))
++	      if (TYPE_P (context))
+ 		context = TYPE_NAME (context);
+ 	      /* Is this a function?  */
+ 	      if (TREE_CODE (context) == FUNCTION_DECL
+@@ -879,9 +880,10 @@ write_unscoped_name (const tree decl)
+   else
+     {
+       /* If not, it should be either in the global namespace, or directly
+-	 in a local function scope.  */
++	 in a local function scope.  A lambda can also be mangled in the
++	 scope of a default argument.  */
+       gcc_assert (context == global_namespace
+-		  || context == NULL
++		  || TREE_CODE (context) == PARM_DECL
+ 		  || TREE_CODE (context) == FUNCTION_DECL);
+ 
+       write_unqualified_name (decl);
+-- 
+1.8.3.2
+

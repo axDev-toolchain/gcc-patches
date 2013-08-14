@@ -1,0 +1,47 @@
+From 9c289590d1f9e5c75fc4e7ba33ab4a86244972a9 Mon Sep 17 00:00:00 2001
+From: Andrew Hsieh <andrewhsieh@google.com>
+Date: Tue, 2 Apr 2013 19:51:54 +0800
+Subject: [PATCH] [4.8] Fixed GCC 4.8 ICE gen_thumb_movhi_clobber at
+ config/arm/arm.md:5832
+
+See issue https://code.google.com/p/android/issues/detail?id=52732,
+and fix http://gcc.gnu.org/ml/gcc-patches/2010-12/msg00732.html
+
+Also see 78a68e851a2f6f9d00367cd38eeedf670bb80f01
+
+Change-Id: Iad4deda17414f3165714da0b60f9f8cb2a6ef052
+---
+ gcc-4.8/gcc/config/arm/arm.c  | 3 ++-
+ gcc-4.8/gcc/config/arm/arm.md | 2 +-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git gcc-4.8/gcc/config/arm/arm.c gcc-4.8/gcc/config/arm/arm.c
+index 2077b97..dd88f0b 100644
+--- gcc-4.8/gcc/config/arm/arm.c
++++ gcc-4.8/gcc/config/arm/arm.c
+@@ -6355,7 +6355,8 @@ arm_preferred_reload_class (rtx x ATTRIBUTE_UNUSED, reg_class_t rclass)
+       if (rclass == GENERAL_REGS
+ 	  || rclass == HI_REGS
+ 	  || rclass == NO_REGS
+-	  || rclass == STACK_REG)
++	  || rclass == STACK_REG
++	  || rclass == CORE_REGS)
+ 	return LO_REGS;
+       else
+ 	return rclass;
+diff --git gcc-4.8/gcc/config/arm/arm.md gcc-4.8/gcc/config/arm/arm.md
+index f3c59f3..a532e56 100644
+--- gcc-4.8/gcc/config/arm/arm.md
++++ gcc-4.8/gcc/config/arm/arm.md
+@@ -6365,7 +6365,7 @@
+ (define_expand "reload_inhi"
+   [(parallel [(match_operand:HI 0 "s_register_operand" "=r")
+ 	      (match_operand:HI 1 "arm_reload_memory_operand" "o")
+-	      (match_operand:DI 2 "s_register_operand" "=&r")])]
++	      (match_operand:DI 2 "s_register_operand" "=&l")])]
+   "TARGET_EITHER"
+   "
+   if (TARGET_ARM)
+-- 
+1.8.3.2
+

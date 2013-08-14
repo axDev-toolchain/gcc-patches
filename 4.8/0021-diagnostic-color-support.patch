@@ -1,0 +1,1138 @@
+From b418cc876926be9532aa8ea868186aa92ed462a0 Mon Sep 17 00:00:00 2001
+From: synergydev <synergye@codefi.re>
+Date: Thu, 8 Aug 2013 04:40:50 -0700
+Subject: [PATCH] [4.8] Backport diagnostic color support from trunk
+
+Squashed commit of r197841, r197842, and r198332 from trunk.
+
+This is capable of coloring errors, warnings, notes, carets, locus', and/or quotes.
+Documentation for this feature may be found here:
+http://gcc.gnu.org/onlinedocs/gcc/Language-Independent-Options.html
+
+Change-Id: I14f2f852562d18fcef807583635e4e2ceee64829
+---
+ gcc-4.8/ChangeLog.backported           |  52 ++++++
+ gcc-4.8/gcc/Makefile.in                |  12 +-
+ gcc-4.8/gcc/c-family/c-format.c        |  18 +-
+ gcc-4.8/gcc/common.opt                 |  24 +++
+ gcc-4.8/gcc/cp/error.c                 |  38 +++--
+ gcc-4.8/gcc/diagnostic-color.c         | 301 +++++++++++++++++++++++++++++++++
+ gcc-4.8/gcc/diagnostic-color.h         |  66 ++++++++
+ gcc-4.8/gcc/diagnostic-core.h          |   2 +-
+ gcc-4.8/gcc/diagnostic.c               |  42 ++++-
+ gcc-4.8/gcc/diagnostic.def             |  28 +--
+ gcc-4.8/gcc/doc/invoke.texi            |  72 ++++++++
+ gcc-4.8/gcc/dwarf2out.c                |   1 +
+ gcc-4.8/gcc/langhooks.c                |   8 +-
+ gcc-4.8/gcc/opts.c                     |   6 +
+ gcc-4.8/gcc/pretty-print.c             |  46 ++++-
+ gcc-4.8/gcc/pretty-print.h             |   6 +
+ gcc-4.8/gcc/testsuite/lib/c-compat.exp |  11 +-
+ gcc-4.8/gcc/testsuite/lib/prune.exp    |   2 +-
+ gcc-4.8/gcc/toplev.c                   |   8 +
+ 19 files changed, 679 insertions(+), 64 deletions(-)
+ create mode 100644 gcc-4.8/gcc/diagnostic-color.c
+ create mode 100644 gcc-4.8/gcc/diagnostic-color.h
+
+diff --git gcc-4.8/gcc/Makefile.in gcc-4.8/gcc/Makefile.in
+index 4b04d64..0df2430 100644
+--- gcc-4.8/gcc/Makefile.in
++++ gcc-4.8/gcc/Makefile.in
+@@ -1463,7 +1463,7 @@ OBJS = \
+ 
+ # Objects in libcommon.a, potentially used by all host binaries and with
+ # no target dependencies.
+-OBJS-libcommon = diagnostic.o pretty-print.o intl.o input.o version.o
++OBJS-libcommon = diagnostic.o diagnostic-color.o pretty-print.o intl.o input.o version.o
+ 
+ # Objects in libcommon-target.a, used by drivers and by the core
+ # compiler and containing target-dependent code.
+@@ -2659,11 +2659,12 @@ fold-const.o : fold-const.c $(CONFIG_H) $(SYSTEM_H) coretypes.h $(TM_H) \
+    $(GIMPLE_H) realmpfr.h $(TREE_FLOW_H)
+ diagnostic.o : diagnostic.c $(CONFIG_H) $(SYSTEM_H) coretypes.h \
+    version.h $(DEMANGLE_H) $(INPUT_H) intl.h $(BACKTRACE_H) $(DIAGNOSTIC_H) \
+-   diagnostic.def
++   diagnostic.def diagnostic-color.h
++diagnostic-color.o : diagnostic-color.c $(CONFIG_H) $(SYSTEM_H) diagnostic-color.h
+ opts.o : opts.c $(OPTS_H) $(OPTIONS_H) $(DIAGNOSTIC_CORE_H) $(CONFIG_H) $(SYSTEM_H) \
+    coretypes.h dumpfile.h $(TM_H) \
+    $(DIAGNOSTIC_H) insn-attr-common.h intl.h $(COMMON_TARGET_H) \
+-   $(FLAGS_H) $(PARAMS_H) opts-diagnostic.h
++   $(FLAGS_H) $(PARAMS_H) opts-diagnostic.h diagnostic-color.h
+ opts-global.o : opts-global.c $(CONFIG_H) $(SYSTEM_H) coretypes.h \
+    $(DIAGNOSTIC_H) $(OPTS_H) $(FLAGS_H) $(GGC_H) $(TREE_H) langhooks.h \
+    $(TM_H) $(RTL_H) $(DBGCNT_H) debug.h $(LTO_STREAMER_H) output.h \
+@@ -2700,7 +2701,7 @@ toplev.o : toplev.c $(CONFIG_H) $(SYSTEM_H) coretypes.h $(TM_H) $(TREE_H) \
+    $(OPTS_H) params.def tree-mudflap.h $(TREE_PASS_H) $(GIMPLE_H) \
+    tree-ssa-alias.h $(PLUGIN_H) realmpfr.h tree-diagnostic.h \
+    $(TREE_PRETTY_PRINT_H) opts-diagnostic.h $(COMMON_TARGET_H) \
+-   tsan.h
++   tsan.h diagnostic-color.h
+ 
+ hwint.o : hwint.c $(CONFIG_H) $(SYSTEM_H) $(DIAGNOSTIC_CORE_H)
+ 
+@@ -3409,7 +3410,8 @@ params.o : params.c $(CONFIG_H) $(SYSTEM_H) coretypes.h $(COMMON_TARGET_H) \
+    $(PARAMS_H) $(DIAGNOSTIC_CORE_H)
+ pointer-set.o: pointer-set.c pointer-set.h $(CONFIG_H) $(SYSTEM_H)
+ hooks.o: hooks.c $(CONFIG_H) $(SYSTEM_H) coretypes.h $(TM_H) $(HOOKS_H)
+-pretty-print.o: $(CONFIG_H) $(SYSTEM_H) coretypes.h intl.h $(PRETTY_PRINT_H)
++pretty-print.o: $(CONFIG_H) $(SYSTEM_H) coretypes.h intl.h $(PRETTY_PRINT_H) \
++   diagnostic-color.h
+ errors.o : errors.c $(CONFIG_H) $(SYSTEM_H) errors.h
+ dbgcnt.o: dbgcnt.c $(CONFIG_H) $(SYSTEM_H) coretypes.h dumpfile.h \
+     $(DIAGNOSTIC_CORE_H) $(DBGCNT_H)
+diff --git gcc-4.8/gcc/c-family/c-format.c gcc-4.8/gcc/c-family/c-format.c
+index 8f1ffed..c11d93a 100644
+--- gcc-4.8/gcc/c-family/c-format.c
++++ gcc-4.8/gcc/c-family/c-format.c
+@@ -654,9 +654,10 @@ static const format_char_info gcc_diag_char_table[] =
+   /* Custom conversion specifiers.  */
+ 
+   /* These will require a "tree" at runtime.  */
+-  { "K", 0, STD_C89, { T89_V,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q",    "",   NULL },
++  { "K",   0, STD_C89, { T89_V,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q",    "",   NULL },
+ 
+-  { "<>'", 0, STD_C89, NOARGUMENTS, "",      "",   NULL },
++  { "r",   1, STD_C89, { T89_C,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "",    "cR",   NULL },
++  { "<>'R",0, STD_C89, NOARGUMENTS, "",      "",   NULL },
+   { "m",   0, STD_C89, NOARGUMENTS, "q",     "",   NULL },
+   { NULL,  0, STD_C89, NOLENGTHS, NULL, NULL, NULL }
+ };
+@@ -676,9 +677,10 @@ static const format_char_info gcc_tdiag_char_table[] =
+   /* These will require a "tree" at runtime.  */
+   { "DFKTEV", 0, STD_C89, { T89_V,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q+", "",   NULL },
+ 
+-  { "v", 0,STD_C89, { T89_I,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q#",  "",   NULL },
++  { "v",   0, STD_C89, { T89_I,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q#",  "",   NULL },
+ 
+-  { "<>'", 0, STD_C89, NOARGUMENTS, "",      "",   NULL },
++  { "r",   1, STD_C89, { T89_C,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "",    "cR",   NULL },
++  { "<>'R",0, STD_C89, NOARGUMENTS, "",      "",   NULL },
+   { "m",   0, STD_C89, NOARGUMENTS, "q",     "",   NULL },
+   { NULL,  0, STD_C89, NOLENGTHS, NULL, NULL, NULL }
+ };
+@@ -698,9 +700,10 @@ static const format_char_info gcc_cdiag_char_table[] =
+   /* These will require a "tree" at runtime.  */
+   { "DEFKTV", 0, STD_C89, { T89_V,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q+", "",   NULL },
+ 
+-  { "v", 0,STD_C89, { T89_I,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q#",  "",   NULL },
++  { "v",   0, STD_C89, { T89_I,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q#",  "",   NULL },
+ 
+-  { "<>'", 0, STD_C89, NOARGUMENTS, "",      "",   NULL },
++  { "r",   1, STD_C89, { T89_C,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "",    "cR",   NULL },
++  { "<>'R",0, STD_C89, NOARGUMENTS, "",      "",   NULL },
+   { "m",   0, STD_C89, NOARGUMENTS, "q",     "",   NULL },
+   { NULL,  0, STD_C89, NOLENGTHS, NULL, NULL, NULL }
+ };
+@@ -725,7 +728,8 @@ static const format_char_info gcc_cxxdiag_char_table[] =
+   /* These accept either an 'int' or an 'enum tree_code' (which is handled as an 'int'.)  */
+   { "CLOPQ",0,STD_C89, { T89_I,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "q",  "",   NULL },
+ 
+-  { "<>'", 0, STD_C89, NOARGUMENTS, "",      "",   NULL },
++  { "r",   1, STD_C89, { T89_C,   BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN,  BADLEN  }, "",    "cR",   NULL },
++  { "<>'R",0, STD_C89, NOARGUMENTS, "",      "",   NULL },
+   { "m",   0, STD_C89, NOARGUMENTS, "q",     "",   NULL },
+   { NULL,  0, STD_C89, NOLENGTHS, NULL, NULL, NULL }
+ };
+diff --git gcc-4.8/gcc/common.opt gcc-4.8/gcc/common.opt
+index 2b051da..c7a6534 100644
+--- gcc-4.8/gcc/common.opt
++++ gcc-4.8/gcc/common.opt
+@@ -1023,6 +1023,30 @@ fdiagnostics-show-caret
+ Common Var(flag_diagnostics_show_caret) Init(1)
+ Show the source line with a caret indicating the column
+ 
++fdiagnostics-color
++Common Alias(fdiagnostics-color=,always,never)
++;
++
++fdiagnostics-color=
++Common Joined RejectNegative Var(flag_diagnostics_show_color) Enum(diagnostic_color_rule) Init(DIAGNOSTICS_COLOR_NO)
++-fdiagnostics-color=[never|always|auto]	Colorize diagnostics
++
++; Required for these enum values.
++SourceInclude
++diagnostic-color.h
++
++Enum
++Name(diagnostic_color_rule) Type(int)
++
++EnumValue
++Enum(diagnostic_color_rule) String(never) Value(DIAGNOSTICS_COLOR_NO)
++
++EnumValue
++Enum(diagnostic_color_rule) String(always) Value(DIAGNOSTICS_COLOR_YES)
++
++EnumValue
++Enum(diagnostic_color_rule) String(auto) Value(DIAGNOSTICS_COLOR_AUTO)
++
+ fdiagnostics-show-option
+ Common Var(flag_diagnostics_show_option) Init(1)
+ Amend appropriate diagnostic messages with the command line option that controls them
+diff --git gcc-4.8/gcc/cp/error.c gcc-4.8/gcc/cp/error.c
+index 35ea0df..a352587 100644
+--- gcc-4.8/gcc/cp/error.c
++++ gcc-4.8/gcc/cp/error.c
+@@ -3010,14 +3010,14 @@ cp_print_error_function (diagnostic_context *context,
+ 		    {
+ 		      if (context->show_column && s.column != 0)
+ 			pp_printf (context->printer,
+-				   _("    inlined from %qs at %s:%d:%d"),
++				   _("    inlined from %qs at %r%s:%d:%d%R"),
+ 				   cxx_printable_name_translate (fndecl, 2),
+-				   s.file, s.line, s.column);
++				   "locus", s.file, s.line, s.column);
+ 		      else
+ 			pp_printf (context->printer,
+-				   _("    inlined from %qs at %s:%d"),
++				   _("    inlined from %qs at %r%s:%d%R"),
+ 				   cxx_printable_name_translate (fndecl, 2),
+-				   s.file, s.line);
++				   "locus", s.file, s.line);
+ 
+ 		    }
+ 		  else
+@@ -3099,11 +3099,11 @@ print_instantiation_partial_context_line (diagnostic_context *context,
+   xloc = expand_location (loc);
+ 
+   if (context->show_column)
+-    pp_verbatim (context->printer, _("%s:%d:%d:   "),
+-		 xloc.file, xloc.line, xloc.column);
++    pp_verbatim (context->printer, _("%r%s:%d:%d:%R   "),
++		 "locus", xloc.file, xloc.line, xloc.column);
+   else
+-    pp_verbatim (context->printer, _("%s:%d:   "),
+-		 xloc.file, xloc.line);
++    pp_verbatim (context->printer, _("%r%s:%d:%R   "),
++		 "locus", xloc.file, xloc.line);
+ 
+   if (t != NULL)
+     {
+@@ -3177,14 +3177,16 @@ print_instantiation_partial_context (diagnostic_context *context,
+ 	  xloc = expand_location (loc);
+ 	  if (context->show_column)
+ 	    pp_verbatim (context->printer,
+-			 _("%s:%d:%d:   [ skipping %d instantiation contexts, "
+-			   "use -ftemplate-backtrace-limit=0 to disable ]\n"),
+-			 xloc.file, xloc.line, xloc.column, skip);
++			 _("%r%s:%d:%d:%R   [ skipping %d instantiation "
++			   "contexts, use -ftemplate-backtrace-limit=0 to "
++			   "disable ]\n"),
++			 "locus", xloc.file, xloc.line, xloc.column, skip);
+ 	  else
+ 	    pp_verbatim (context->printer,
+-			 _("%s:%d:   [ skipping %d instantiation contexts, "
+-			   "use -ftemplate-backtrace-limit=0 to disable ]\n"),
+-			 xloc.file, xloc.line, skip);
++			 _("%r%s:%d:%R   [ skipping %d instantiation "
++			   "contexts, use -ftemplate-backtrace-limit=0 to "
++			   "disable ]\n"),
++			 "locus", xloc.file, xloc.line, skip);
+ 	  
+ 	  do {
+ 	    loc = t->locus;
+@@ -3246,12 +3248,12 @@ maybe_print_constexpr_context (diagnostic_context *context)
+       const char *s = expr_as_string (t, 0);
+       if (context->show_column)
+ 	pp_verbatim (context->printer,
+-		     _("%s:%d:%d:   in constexpr expansion of %qs"),
+-		     xloc.file, xloc.line, xloc.column, s);
++		     _("%r%s:%d:%d:%R   in constexpr expansion of %qs"),
++		     "locus", xloc.file, xloc.line, xloc.column, s);
+       else
+ 	pp_verbatim (context->printer,
+-		     _("%s:%d:   in constexpr expansion of %qs"),
+-		     xloc.file, xloc.line, s);
++		     _("%r%s:%d:%R   in constexpr expansion of %qs"),
++		     "locus", xloc.file, xloc.line, s);
+       pp_base_newline (context->printer);
+     }
+ }
+diff --git gcc-4.8/gcc/diagnostic-color.c gcc-4.8/gcc/diagnostic-color.c
+new file mode 100644
+index 0000000..a1c508a
+--- /dev/null
++++ gcc-4.8/gcc/diagnostic-color.c
+@@ -0,0 +1,301 @@
++/* Output colorization.
++   Copyright 2011-2013 Free Software Foundation, Inc.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 3, or (at your option)
++   any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program; if not, write to the Free Software
++   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA
++   02110-1301, USA.  */
++
++#include "config.h"
++#include "system.h"
++#include "diagnostic-color.h"
++
++/* Select Graphic Rendition (SGR, "\33[...m") strings.  */
++/* Also Erase in Line (EL) to Right ("\33[K") by default.  */
++/*    Why have EL to Right after SGR?
++	 -- The behavior of line-wrapping when at the bottom of the
++	    terminal screen and at the end of the current line is often
++	    such that a new line is introduced, entirely cleared with
++	    the current background color which may be different from the
++	    default one (see the boolean back_color_erase terminfo(5)
++	    capability), thus scrolling the display by one line.
++	    The end of this new line will stay in this background color
++	    even after reverting to the default background color with
++	    "\33[m', unless it is explicitly cleared again with "\33[K"
++	    (which is the behavior the user would instinctively expect
++	    from the whole thing).  There may be some unavoidable
++	    background-color flicker at the end of this new line because
++	    of this (when timing with the monitor's redraw is just right).
++	 -- The behavior of HT (tab, "\t") is usually the same as that of
++	    Cursor Forward Tabulation (CHT) with a default parameter
++	    of 1 ("\33[I"), i.e., it performs pure movement to the next
++	    tab stop, without any clearing of either content or screen
++	    attributes (including background color); try
++	       printf 'asdfqwerzxcv\rASDF\tZXCV\n'
++	    in a bash(1) shell to demonstrate this.  This is not what the
++	    user would instinctively expect of HT (but is ok for CHT).
++	    The instinctive behavior would include clearing the terminal
++	    cells that are skipped over by HT with blank cells in the
++	    current screen attributes, including background color;
++	    the boolean dest_tabs_magic_smso terminfo(5) capability
++	    indicates this saner behavior for HT, but only some rare
++	    terminals have it (although it also indicates a special
++	    glitch with standout mode in the Teleray terminal for which
++	    it was initially introduced).  The remedy is to add "\33K"
++	    after each SGR sequence, be it START (to fix the behavior
++	    of any HT after that before another SGR) or END (to fix the
++	    behavior of an HT in default background color that would
++	    follow a line-wrapping at the bottom of the screen in another
++	    background color, and to complement doing it after START).
++	    Piping GCC's output through a pager such as less(1) avoids
++	    any HT problems since the pager performs tab expansion.
++
++      Generic disadvantages of this remedy are:
++	 -- Some very rare terminals might support SGR but not EL (nobody
++	    will use "gcc -fdiagnostics-color" on a terminal that does not
++	    support SGR in the first place).
++	 -- Having these extra control sequences might somewhat complicate
++	    the task of any program trying to parse "gcc -fdiagnostics-color"
++	    output in order to extract structuring information from it.
++      A specific disadvantage to doing it after SGR START is:
++	 -- Even more possible background color flicker (when timing
++	    with the monitor's redraw is just right), even when not at the
++	    bottom of the screen.
++      There are no additional disadvantages specific to doing it after
++      SGR END.
++
++      It would be impractical for GCC to become a full-fledged
++      terminal program linked against ncurses or the like, so it will
++      not detect terminfo(5) capabilities.  */
++#define COLOR_SEPARATOR		";"
++#define COLOR_NONE		"00"
++#define COLOR_BOLD		"01"
++#define COLOR_UNDERSCORE	"04"
++#define COLOR_BLINK		"05"
++#define COLOR_REVERSE		"07"
++#define COLOR_FG_BLACK		"30"
++#define COLOR_FG_RED		"31"
++#define COLOR_FG_GREEN		"32"
++#define COLOR_FG_YELLOW		"33"
++#define COLOR_FG_BLUE		"34"
++#define COLOR_FG_MAGENTA	"35"
++#define COLOR_FG_CYAN		"36"
++#define COLOR_FG_WHITE		"37"
++#define COLOR_BG_BLACK		"40"
++#define COLOR_BG_RED		"41"
++#define COLOR_BG_GREEN		"42"
++#define COLOR_BG_YELLOW		"43"
++#define COLOR_BG_BLUE		"44"
++#define COLOR_BG_MAGENTA	"45"
++#define COLOR_BG_CYAN		"46"
++#define COLOR_BG_WHITE		"47"
++#define SGR_START		"\33["
++#define SGR_END			"m\33[K"
++#define SGR_SEQ(str)		SGR_START str SGR_END
++#define SGR_RESET		SGR_SEQ("")
++
++
++/* The context and logic for choosing default --color screen attributes
++   (foreground and background colors, etc.) are the following.
++      -- There are eight basic colors available, each with its own
++	 nominal luminosity to the human eye and foreground/background
++	 codes (black [0 %, 30/40], blue [11 %, 34/44], red [30 %, 31/41],
++	 magenta [41 %, 35/45], green [59 %, 32/42], cyan [70 %, 36/46],
++	 yellow [89 %, 33/43], and white [100 %, 37/47]).
++      -- Sometimes, white as a background is actually implemented using
++	 a shade of light gray, so that a foreground white can be visible
++	 on top of it (but most often not).
++      -- Sometimes, black as a foreground is actually implemented using
++	 a shade of dark gray, so that it can be visible on top of a
++	 background black (but most often not).
++      -- Sometimes, more colors are available, as extensions.
++      -- Other attributes can be selected/deselected (bold [1/22],
++	 underline [4/24], standout/inverse [7/27], blink [5/25], and
++	 invisible/hidden [8/28]).  They are sometimes implemented by
++	 using colors instead of what their names imply; e.g., bold is
++	 often achieved by using brighter colors.  In practice, only bold
++	 is really available to us, underline sometimes being mapped by
++	 the terminal to some strange color choice, and standout best
++	 being left for use by downstream programs such as less(1).
++      -- We cannot assume that any of the extensions or special features
++	 are available for the purpose of choosing defaults for everyone.
++      -- The most prevalent default terminal backgrounds are pure black
++	 and pure white, and are not necessarily the same shades of
++	 those as if they were selected explicitly with SGR sequences.
++	 Some terminals use dark or light pictures as default background,
++	 but those are covered over by an explicit selection of background
++	 color with an SGR sequence; their users will appreciate their
++	 background pictures not be covered like this, if possible.
++      -- Some uses of colors attributes is to make some output items
++	 more understated (e.g., context lines); this cannot be achieved
++	 by changing the background color.
++      -- For these reasons, the GCC color defaults should strive not
++	 to change the background color from its default, unless it's
++	 for a short item that should be highlighted, not understated.
++      -- The GCC foreground color defaults (without an explicitly set
++	 background) should provide enough contrast to be readable on any
++	 terminal with either a black (dark) or white (light) background.
++	 This only leaves red, magenta, green, and cyan (and their bold
++	 counterparts) and possibly bold blue.  */
++/* Default colors. The user can overwrite them using environment
++   variable GCC_COLORS.  */
++struct color_cap
++{
++  const char *name;
++  const char *val;
++  unsigned char name_len;
++  bool free_val;
++};
++
++/* For GCC_COLORS.  */
++static struct color_cap color_dict[] =
++{
++  { "error", SGR_SEQ (COLOR_BOLD COLOR_SEPARATOR COLOR_FG_RED), 5, false },
++  { "warning", SGR_SEQ (COLOR_BOLD COLOR_SEPARATOR COLOR_FG_MAGENTA),
++	       7, false },
++  { "note", SGR_SEQ (COLOR_BOLD COLOR_SEPARATOR COLOR_FG_CYAN), 4, false },
++  { "caret", SGR_SEQ (COLOR_BOLD COLOR_SEPARATOR COLOR_FG_GREEN), 5, false },
++  { "locus", SGR_SEQ (COLOR_BOLD), 5, false },
++  { "quote", SGR_SEQ (COLOR_BOLD), 5, false },
++  { NULL, NULL, 0, false }
++};
++
++const char *
++colorize_start (bool show_color, const char *name, size_t name_len)
++{
++  struct color_cap const *cap;
++
++  if (!show_color)
++    return "";
++
++  for (cap = color_dict; cap->name; cap++)
++    if (cap->name_len == name_len
++	&& memcmp (cap->name, name, name_len) == 0)
++      break;
++  if (cap->name == NULL)
++    return "";
++
++  return cap->val;
++}
++
++const char *
++colorize_stop (bool show_color)
++{
++  return show_color ? SGR_RESET : "";
++}
++
++/* Parse GCC_COLORS.  The default would look like:
++   GCC_COLORS='error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01'
++   No character escaping is needed or supported.  */
++static bool
++parse_gcc_colors (void)
++{
++  const char *p, *q, *name, *val;
++  char *b;
++  size_t name_len = 0, val_len = 0;
++
++  p = getenv ("GCC_COLORS"); /* Plural! */
++  if (p == NULL)
++    return true;
++  if (*p == '\0')
++    return false;
++
++  name = q = p;
++  val = NULL;
++  /* From now on, be well-formed or you're gone.  */
++  for (;;)
++    if (*q == ':' || *q == '\0')
++      {
++	struct color_cap *cap;
++
++	if (val)
++	  val_len = q - val;
++	else
++	  name_len = q - name;
++	/* Empty name without val (empty cap)
++	   won't match and will be ignored.  */
++	for (cap = color_dict; cap->name; cap++)
++	  if (cap->name_len == name_len
++	      && memcmp (cap->name, name, name_len) == 0)
++	    break;
++	/* If name unknown, go on for forward compatibility.  */
++	if (cap->val && val)
++	  {
++	    if (cap->free_val)
++	      free (CONST_CAST (char *, cap->val));
++	    b = XNEWVEC (char, val_len + sizeof (SGR_SEQ ("")));
++	    memcpy (b, SGR_START, strlen (SGR_START));
++	    memcpy (b + strlen (SGR_START), val, val_len);
++	    memcpy (b + strlen (SGR_START) + val_len, SGR_END,
++		    sizeof (SGR_END));
++	    cap->val = (const char *) b;
++	    cap->free_val = true;
++	  }
++	if (*q == '\0')
++	  return true;
++	name = ++q;
++	val = NULL;
++      }
++    else if (*q == '=')
++      {
++	if (q == name || val)
++	  return true;
++
++	name_len = q - name;
++	val = ++q; /* Can be the empty string.  */
++      }
++    else if (val == NULL)
++      q++; /* Accumulate name.  */
++    else if (*q == ';' || (*q >= '0' && *q <= '9'))
++      q++; /* Accumulate val.  Protect the terminal from being sent
++	      garbage.  */
++    else
++      return true;
++}
++
++#if defined(_WIN32)
++bool
++colorize_init (diagnostic_color_rule_t)
++{
++  return false;
++}
++#else
++
++/* Return true if we should use color when in auto mode, false otherwise. */
++static bool
++should_colorize (void)
++{
++  char const *t = getenv ("TERM");
++  return t && strcmp (t, "dumb") != 0 && isatty (STDERR_FILENO);
++}
++
++
++bool
++colorize_init (diagnostic_color_rule_t rule)
++{
++  switch (rule)
++    {
++    case DIAGNOSTICS_COLOR_NO:
++      return false;
++    case DIAGNOSTICS_COLOR_YES:
++      return parse_gcc_colors ();
++    case DIAGNOSTICS_COLOR_AUTO:
++      if (should_colorize ())
++	return parse_gcc_colors ();
++      else
++	return false;
++    default:
++      gcc_unreachable ();
++    }
++}
++#endif
+diff --git gcc-4.8/gcc/diagnostic-color.h gcc-4.8/gcc/diagnostic-color.h
+new file mode 100644
+index 0000000..e643e51
+--- /dev/null
++++ gcc-4.8/gcc/diagnostic-color.h
+@@ -0,0 +1,66 @@
++/* Copyright (C) 2013 Free Software Foundation, Inc.
++   Contributed by Manuel Lopez-Ibanez <manu@gcc.gnu.org>
++
++This file is part of GCC.
++
++GCC is free software; you can redistribute it and/or modify it under
++the terms of the GNU General Public License as published by the Free
++Software Foundation; either version 3, or (at your option) any later
++version.
++
++GCC is distributed in the hope that it will be useful, but WITHOUT ANY
++WARRANTY; without even the implied warranty of MERCHANTABILITY or
++FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++for more details.
++
++You should have received a copy of the GNU General Public License
++along with GCC; see the file COPYING3.  If not see
++<http://www.gnu.org/licenses/>.  */
++
++/* Based on code from: */
++/* grep.c - main driver file for grep.
++   Copyright (C) 1992, 1997-2002, 2004-2013 Free Software Foundation, Inc.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 3, or (at your option)
++   any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program; if not, write to the Free Software
++   Foundation, Inc., 51 Franklin Street - Fifth Floor, Boston, MA
++   02110-1301, USA.
++
++   Written July 1992 by Mike Haertel.  */
++
++#ifndef GCC_DIAGNOSTIC_COLOR_H
++#define GCC_DIAGNOSTIC_COLOR_H
++
++/* How often diagnostics are prefixed by their locations:
++   o DIAGNOSTICS_SHOW_PREFIX_NEVER: never - not yet supported;
++   o DIAGNOSTICS_SHOW_PREFIX_ONCE: emit only once;
++   o DIAGNOSTICS_SHOW_PREFIX_EVERY_LINE: emit each time a physical
++   line is started.  */
++typedef enum
++{
++  DIAGNOSTICS_COLOR_NO       = 0,
++  DIAGNOSTICS_COLOR_YES      = 1,
++  DIAGNOSTICS_COLOR_AUTO     = 2
++} diagnostic_color_rule_t;
++
++const char *colorize_start (bool, const char *, size_t);
++const char *colorize_stop (bool);
++bool colorize_init (diagnostic_color_rule_t);
++
++inline const char *
++colorize_start (bool show_color, const char *name)
++{
++  return colorize_start (show_color, name, strlen (name));
++}
++
++#endif /* ! GCC_DIAGNOSTIC_COLOR_H */
+diff --git gcc-4.8/gcc/diagnostic-core.h gcc-4.8/gcc/diagnostic-core.h
+index 68ec837..a210782 100644
+--- gcc-4.8/gcc/diagnostic-core.h
++++ gcc-4.8/gcc/diagnostic-core.h
+@@ -28,7 +28,7 @@ along with GCC; see the file COPYING3.  If not see
+ /* Constants used to discriminate diagnostics.  */
+ typedef enum
+ {
+-#define DEFINE_DIAGNOSTIC_KIND(K, msgid) K,
++#define DEFINE_DIAGNOSTIC_KIND(K, msgid, C) K,
+ #include "diagnostic.def"
+ #undef DEFINE_DIAGNOSTIC_KIND
+   DK_LAST_DIAGNOSTIC_KIND,
+diff --git gcc-4.8/gcc/diagnostic.c gcc-4.8/gcc/diagnostic.c
+index a365c60..46986ca 100644
+--- gcc-4.8/gcc/diagnostic.c
++++ gcc-4.8/gcc/diagnostic.c
+@@ -31,6 +31,7 @@ along with GCC; see the file COPYING3.  If not see
+ #include "intl.h"
+ #include "backtrace.h"
+ #include "diagnostic.h"
++#include "diagnostic-color.h"
+ 
+ #define pedantic_warning_kind(DC)			\
+   ((DC)->pedantic_errors ? DK_ERROR : DK_WARNING)
+@@ -53,7 +54,6 @@ const char *progname;
+ /* A diagnostic_context surrogate for stderr.  */
+ static diagnostic_context global_diagnostic_context;
+ diagnostic_context *global_dc = &global_diagnostic_context;
+-
+ 
+ /* Return a malloc'd string containing MSG formatted a la printf.  The
+    caller is responsible for freeing the memory.  */
+@@ -210,12 +210,31 @@ diagnostic_build_prefix (diagnostic_context *context,
+ 			 const diagnostic_info *diagnostic)
+ {
+   static const char *const diagnostic_kind_text[] = {
+-#define DEFINE_DIAGNOSTIC_KIND(K, T) (T),
++#define DEFINE_DIAGNOSTIC_KIND(K, T, C) (T),
+ #include "diagnostic.def"
+ #undef DEFINE_DIAGNOSTIC_KIND
+     "must-not-happen"
+   };
++  static const char *const diagnostic_kind_color[] = {
++#define DEFINE_DIAGNOSTIC_KIND(K, T, C) (C),
++#include "diagnostic.def"
++#undef DEFINE_DIAGNOSTIC_KIND
++    NULL
++  };
+   const char *text = _(diagnostic_kind_text[diagnostic->kind]);
++  const char *text_cs = "", *text_ce = "";
++  const char *locus_cs, *locus_ce;
++  pretty_printer *pp = context->printer;
++
++  if (diagnostic_kind_color[diagnostic->kind])
++    {
++      text_cs = colorize_start (pp_show_color (pp),
++				diagnostic_kind_color[diagnostic->kind]);
++      text_ce = colorize_stop (pp_show_color (pp));
++    }
++  locus_cs = colorize_start (pp_show_color (pp), "locus");
++  locus_ce = colorize_stop (pp_show_color (pp));
++
+   expanded_location s = expand_location_to_spelling_point (diagnostic->location);
+   if (diagnostic->override_column)
+     s.column = diagnostic->override_column;
+@@ -223,10 +242,13 @@ diagnostic_build_prefix (diagnostic_context *context,
+ 
+   return
+     (s.file == NULL
+-     ? build_message_string ("%s: %s", progname, text)
++     ? build_message_string ("%s%s:%s %s%s%s", locus_cs, progname, locus_ce,
++			     text_cs, text, text_ce)
+      : context->show_column
+-     ? build_message_string ("%s:%d:%d: %s", s.file, s.line, s.column, text)
+-     : build_message_string ("%s:%d: %s", s.file, s.line, text));
++     ? build_message_string ("%s%s:%d:%d:%s %s%s%s", locus_cs, s.file, s.line,
++			     s.column, locus_ce, text_cs, text, text_ce)
++     : build_message_string ("%s%s:%d:%s %s%s%s", locus_cs, s.file, s.line, locus_ce,
++			     text_cs, text, text_ce));
+ }
+ 
+ /* If LINE is longer than MAX_WIDTH, and COLUMN is not smaller than
+@@ -262,7 +284,7 @@ diagnostic_show_locus (diagnostic_context * context,
+   expanded_location s;
+   int max_width;
+   const char *saved_prefix;
+-
++  const char *caret_cs, *caret_ce;
+ 
+   if (!context->show_caret
+       || diagnostic->location <= BUILTINS_LOCATION
+@@ -290,9 +312,13 @@ diagnostic_show_locus (diagnostic_context * context,
+       line++;
+     }
+   pp_newline (context->printer);
++  caret_cs = colorize_start (pp_show_color (context->printer), "caret");
++  caret_ce = colorize_stop (pp_show_color (context->printer));
++
+   /* pp_printf does not implement %*c.  */
+-  buffer = XALLOCAVEC (char, s.column + 3);
+-  snprintf (buffer, s.column + 3, " %*c", s.column, '^');
++  size_t len = s.column + 3 + strlen (caret_cs) + strlen (caret_ce);
++  buffer = XALLOCAVEC (char, len);
++  snprintf (buffer, len, "%s %*c%s", caret_cs, s.column, '^', caret_ce);
+   pp_string (context->printer, buffer);
+   pp_set_prefix (context->printer, saved_prefix);
+ }
+diff --git gcc-4.8/gcc/diagnostic.def gcc-4.8/gcc/diagnostic.def
+index 53179e4..2f1e365 100644
+--- gcc-4.8/gcc/diagnostic.def
++++ gcc-4.8/gcc/diagnostic.def
+@@ -22,24 +22,26 @@ along with GCC; see the file COPYING3.  If not see
+    kind specified.  I.e. they're uninitialized.  Within the diagnostic
+    machinery, this kind also means "don't change the existing kind",
+    meaning "no change is specified".  */
+-DEFINE_DIAGNOSTIC_KIND (DK_UNSPECIFIED, "")
++DEFINE_DIAGNOSTIC_KIND (DK_UNSPECIFIED, "", NULL)
+ 
+ /* If a diagnostic is set to DK_IGNORED, it won't get reported at all.
+    This is used by the diagnostic machinery when it wants to disable a
+    diagnostic without disabling the option which causes it.  */
+-DEFINE_DIAGNOSTIC_KIND (DK_IGNORED, "")
++DEFINE_DIAGNOSTIC_KIND (DK_IGNORED, "", NULL)
+ 
+ /* The remainder are real diagnostic types.  */
+-DEFINE_DIAGNOSTIC_KIND (DK_FATAL, "fatal error: ")
+-DEFINE_DIAGNOSTIC_KIND (DK_ICE, "internal compiler error: ")
+-DEFINE_DIAGNOSTIC_KIND (DK_ERROR, "error: ")
+-DEFINE_DIAGNOSTIC_KIND (DK_SORRY, "sorry, unimplemented: ")
+-DEFINE_DIAGNOSTIC_KIND (DK_WARNING, "warning: ")
+-DEFINE_DIAGNOSTIC_KIND (DK_ANACHRONISM, "anachronism: ")
+-DEFINE_DIAGNOSTIC_KIND (DK_NOTE, "note: ")
+-DEFINE_DIAGNOSTIC_KIND (DK_DEBUG, "debug: ")
++DEFINE_DIAGNOSTIC_KIND (DK_FATAL, "fatal error: ", "error")
++DEFINE_DIAGNOSTIC_KIND (DK_ICE, "internal compiler error: ", "error")
++DEFINE_DIAGNOSTIC_KIND (DK_ERROR, "error: ", "error")
++DEFINE_DIAGNOSTIC_KIND (DK_SORRY, "sorry, unimplemented: ", "error")
++DEFINE_DIAGNOSTIC_KIND (DK_WARNING, "warning: ", "warning")
++DEFINE_DIAGNOSTIC_KIND (DK_ANACHRONISM, "anachronism: ", "warning")
++DEFINE_DIAGNOSTIC_KIND (DK_NOTE, "note: ", "note")
++DEFINE_DIAGNOSTIC_KIND (DK_DEBUG, "debug: ", "note")
+ /* These two would be re-classified as DK_WARNING or DK_ERROR, so the
+ prefix does not matter.  */
+-DEFINE_DIAGNOSTIC_KIND (DK_PEDWARN, "pedwarn: ")
+-DEFINE_DIAGNOSTIC_KIND (DK_PERMERROR, "permerror: ")
+-
++DEFINE_DIAGNOSTIC_KIND (DK_PEDWARN, "pedwarn: ", NULL)
++DEFINE_DIAGNOSTIC_KIND (DK_PERMERROR, "permerror: ", NULL)
++/* This one is just for counting DK_WARNING promoted to DK_ERROR
++   due to -Werror and -Werror=warning.  */
++DEFINE_DIAGNOSTIC_KIND (DK_WERROR, "error: ", NULL)
+diff --git gcc-4.8/gcc/doc/invoke.texi gcc-4.8/gcc/doc/invoke.texi
+index ab92775..dbe2ad3 100644
+--- gcc-4.8/gcc/doc/invoke.texi
++++ gcc-4.8/gcc/doc/invoke.texi
+@@ -226,6 +226,7 @@ Objective-C and Objective-C++ Dialects}.
+ @xref{Language Independent Options,,Options to Control Diagnostic Messages Formatting}.
+ @gccoptlist{-fmessage-length=@var{n}  @gol
+ -fdiagnostics-show-location=@r{[}once@r{|}every-line@r{]}  @gol
++-fdiagnostics-color=@r{[}auto@r{|}never@r{|}always@r{]}  @gol
+ -fno-diagnostics-show-option -fno-diagnostics-show-caret}
+ 
+ @item Warning Options
+@@ -2954,6 +2955,77 @@ messages reporter to emit the same source location information (as
+ prefix) for physical lines that result from the process of breaking
+ a message which is too long to fit on a single line.
+ 
++@item -fdiagnostics-color[=@var{WHEN}]
++@itemx -fno-diagnostics-color
++@opindex fdiagnostics-color
++@cindex highlight, color, colour
++@vindex GCC_COLORS @r{environment variable}
++Use color in diagnostics.  @var{WHEN} is @samp{never}, @samp{always},
++or @samp{auto}.  The default is @samp{never} if @env{GCC_COLORS} environment
++variable isn't present in the environment, and @samp{auto} otherwise.
++@samp{auto} means to use color only when the standard error is a terminal.
++The forms @option{-fdiagnostics-color} and @option{-fno-diagnostics-color} are
++aliases for @option{-fdiagnostics-color=always} and
++@option{-fdiagnostics-color=never}, respectively.
++
++The colors are defined by the environment variable @env{GCC_COLORS}.
++Its value is a colon-separated list of capabilities and Select Graphic
++Rendition (SGR) substrings. SGR commands are interpreted by the
++terminal or terminal emulator.  (See the section in the documentation
++of your text terminal for permitted values and their meanings as
++character attributes.)  These substring values are integers in decimal
++representation and can be concatenated with semicolons.
++Common values to concatenate include
++@samp{1} for bold,
++@samp{4} for underline,
++@samp{5} for blink,
++@samp{7} for inverse,
++@samp{39} for default foreground color,
++@samp{30} to @samp{37} for foreground colors,
++@samp{90} to @samp{97} for 16-color mode foreground colors,
++@samp{38;5;0} to @samp{38;5;255}
++for 88-color and 256-color modes foreground colors,
++@samp{49} for default background color,
++@samp{40} to @samp{47} for background colors,
++@samp{100} to @samp{107} for 16-color mode background colors,
++and @samp{48;5;0} to @samp{48;5;255}
++for 88-color and 256-color modes background colors.
++
++The default @env{GCC_COLORS} is
++@samp{error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01}
++where @samp{01;31} is bold red, @samp{01;35} is bold magenta,
++@samp{01;36} is bold cyan, @samp{01;32} is bold green and
++@samp{01} is bold. Setting @env{GCC_COLORS} to the empty
++string disables colors.
++Supported capabilities are as follows.
++
++@table @code
++@item error=
++@vindex error GCC_COLORS @r{capability}
++SGR substring for error: markers.
++
++@item warning=
++@vindex warning GCC_COLORS @r{capability}
++SGR substring for warning: markers.
++
++@item note=
++@vindex note GCC_COLORS @r{capability}
++SGR substring for note: markers.
++
++@item caret=
++@vindex caret GCC_COLORS @r{capability}
++SGR substring for caret line.
++
++@item locus=
++@vindex locus GCC_COLORS @r{capability}
++SGR substring for location information, @samp{file:line} or
++@samp{file:line:column} etc.
++
++@item quote=
++@vindex quote GCC_COLORS @r{capability}
++SGR substring for information printed within quotes.
++@end table
++
+ @item -fno-diagnostics-show-option
+ @opindex fno-diagnostics-show-option
+ @opindex fdiagnostics-show-option
+diff --git gcc-4.8/gcc/dwarf2out.c gcc-4.8/gcc/dwarf2out.c
+index 77771c0..2bf53a1 100644
+--- gcc-4.8/gcc/dwarf2out.c
++++ gcc-4.8/gcc/dwarf2out.c
+@@ -18803,6 +18803,7 @@ gen_producer_string (void)
+       case OPT_fdiagnostics_show_location_:
+       case OPT_fdiagnostics_show_option:
+       case OPT_fdiagnostics_show_caret:
++      case OPT_fdiagnostics_color_:
+       case OPT_fverbose_asm:
+       case OPT____:
+       case OPT__sysroot_:
+diff --git gcc-4.8/gcc/langhooks.c gcc-4.8/gcc/langhooks.c
+index 3a22d6b..70af8da 100644
+--- gcc-4.8/gcc/langhooks.c
++++ gcc-4.8/gcc/langhooks.c
+@@ -452,14 +452,14 @@ lhd_print_error_function (diagnostic_context *context, const char *file,
+ 		    {
+ 		      if (context->show_column)
+ 			pp_printf (context->printer,
+-				   _("    inlined from %qs at %s:%d:%d"),
++				   _("    inlined from %qs at %r%s:%d:%d%R"),
+ 				   identifier_to_locale (lang_hooks.decl_printable_name (fndecl, 2)),
+-				   s.file, s.line, s.column);
++				   "locus", s.file, s.line, s.column);
+ 		      else
+ 			pp_printf (context->printer,
+-				   _("    inlined from %qs at %s:%d"),
++				   _("    inlined from %qs at %r%s:%d%R"),
+ 				   identifier_to_locale (lang_hooks.decl_printable_name (fndecl, 2)),
+-				   s.file, s.line);
++				   "locus", s.file, s.line);
+ 
+ 		    }
+ 		  else
+diff --git gcc-4.8/gcc/opts.c gcc-4.8/gcc/opts.c
+index 45b12fe..7ae1e00 100644
+--- gcc-4.8/gcc/opts.c
++++ gcc-4.8/gcc/opts.c
+@@ -30,6 +30,7 @@ along with GCC; see the file COPYING3.  If not see
+ #include "flags.h"
+ #include "params.h"
+ #include "diagnostic.h"
++#include "diagnostic-color.h"
+ #include "opts-diagnostic.h"
+ #include "insn-attr-common.h"
+ #include "common/common-target.h"
+@@ -1497,6 +1498,11 @@ common_handle_option (struct gcc_options *opts,
+       dc->show_caret = value;
+       break;
+ 
++    case OPT_fdiagnostics_color_:
++      pp_show_color (dc->printer)
++	= colorize_init ((diagnostic_color_rule_t) value);
++      break;
++
+     case OPT_fdiagnostics_show_option:
+       dc->show_option_requested = value;
+       break;
+diff --git gcc-4.8/gcc/pretty-print.c gcc-4.8/gcc/pretty-print.c
+index 4c45e51..fe46464 100644
+--- gcc-4.8/gcc/pretty-print.c
++++ gcc-4.8/gcc/pretty-print.c
+@@ -23,6 +23,7 @@ along with GCC; see the file COPYING3.  If not see
+ #include "coretypes.h"
+ #include "intl.h"
+ #include "pretty-print.h"
++#include "diagnostic-color.h"
+ 
+ #if HAVE_ICONV
+ #include <iconv.h>
+@@ -226,6 +227,8 @@ pp_base_indent (pretty_printer *pp)
+    %c: character.
+    %s: string.
+    %p: pointer.
++   %r: if pp_show_color(pp), switch to color identified by const char *.
++   %R: if pp_show_color(pp), reset color.
+    %m: strerror(text->err_no) - does not consume a value from args_ptr.
+    %%: '%'.
+    %<: opening quote.
+@@ -300,18 +303,37 @@ pp_base_format (pretty_printer *pp, text_info *text)
+ 	  continue;
+ 
+ 	case '<':
+-	  obstack_grow (&buffer->chunk_obstack,
+-			open_quote, strlen (open_quote));
+-	  p++;
+-	  continue;
++	  {
++	    obstack_grow (&buffer->chunk_obstack,
++			  open_quote, strlen (open_quote));
++	    const char *colorstr
++	      = colorize_start (pp_show_color (pp), "quote");
++	    obstack_grow (&buffer->chunk_obstack, colorstr, strlen (colorstr));
++	    p++;
++	    continue;
++	  }
+ 
+ 	case '>':
++	  {
++	    const char *colorstr = colorize_stop (pp_show_color (pp));
++	    obstack_grow (&buffer->chunk_obstack, colorstr, strlen (colorstr));
++	  }
++	  /* FALLTHRU */
+ 	case '\'':
+ 	  obstack_grow (&buffer->chunk_obstack,
+ 			close_quote, strlen (close_quote));
+ 	  p++;
+ 	  continue;
+ 
++	case 'R':
++	  {
++	    const char *colorstr = colorize_stop (pp_show_color (pp));
++	    obstack_grow (&buffer->chunk_obstack, colorstr,
++			  strlen (colorstr));
++	    p++;
++	    continue;
++	  }
++
+ 	case 'm':
+ 	  {
+ 	    const char *errstr = xstrerror (text->err_no);
+@@ -466,10 +488,19 @@ pp_base_format (pretty_printer *pp, text_info *text)
+       gcc_assert (!wide || precision == 0);
+ 
+       if (quote)
+-	pp_string (pp, open_quote);
++	{
++	  pp_string (pp, open_quote);
++	  pp_string (pp, colorize_start (pp_show_color (pp), "quote"));
++	}
+ 
+       switch (*p)
+ 	{
++	case 'r':
++	  pp_string (pp, colorize_start (pp_show_color (pp),
++					 va_arg (*text->args_ptr,
++						 const char *)));
++	  break;
++
+ 	case 'c':
+ 	  pp_character (pp, va_arg (*text->args_ptr, int));
+ 	  break;
+@@ -563,7 +594,10 @@ pp_base_format (pretty_printer *pp, text_info *text)
+ 	}
+ 
+       if (quote)
+-	pp_string (pp, close_quote);
++	{
++	  pp_string (pp, colorize_stop (pp_show_color (pp)));
++	  pp_string (pp, close_quote);
++	}
+ 
+       obstack_1grow (&buffer->chunk_obstack, '\0');
+       *formatters[argno] = XOBFINISH (&buffer->chunk_obstack, const char *);
+diff --git gcc-4.8/gcc/pretty-print.h gcc-4.8/gcc/pretty-print.h
+index 56d2d3e..13bb2de 100644
+--- gcc-4.8/gcc/pretty-print.h
++++ gcc-4.8/gcc/pretty-print.h
+@@ -151,6 +151,9 @@ typedef bool (*printer_fn) (pretty_printer *, text_info *, const char *,
+    output.  */
+ #define pp_translate_identifiers(PP) pp_base (PP)->translate_identifiers
+ 
++/* True if colors should be shown.  */
++#define pp_show_color(PP) pp_base (PP)->show_color
++
+ /* The data structure that contains the bare minimum required to do
+    proper pretty-printing.  Clients may derived from this structure
+    and add additional fields they need.  */
+@@ -194,6 +197,9 @@ struct pretty_print_info
+   /* Nonzero means identifiers are translated to the locale character
+      set on output.  */
+   bool translate_identifiers;
++
++  /* Nonzero means that text should be colorized.  */
++  bool show_color;
+ };
+ 
+ #define pp_set_line_maximum_length(PP, L) \
+diff --git gcc-4.8/gcc/testsuite/lib/c-compat.exp gcc-4.8/gcc/testsuite/lib/c-compat.exp
+index 58eaf4d..b42545d 100644
+--- gcc-4.8/gcc/testsuite/lib/c-compat.exp
++++ gcc-4.8/gcc/testsuite/lib/c-compat.exp
+@@ -34,7 +34,7 @@ load_lib target-supports.exp
+ # 
+ proc compat-use-alt-compiler { } {
+     global GCC_UNDER_TEST ALT_CC_UNDER_TEST
+-    global compat_same_alt compat_alt_caret
++    global compat_same_alt compat_alt_caret compat_alt_color
+     global TEST_ALWAYS_FLAGS
+ 
+     # We don't need to do this if the alternate compiler is actually
+@@ -44,6 +44,9 @@ proc compat-use-alt-compiler { } {
+ 	if { $compat_alt_caret == 0 } then {
+ 	    regsub -- "-fno-diagnostics-show-caret" $TEST_ALWAYS_FLAGS "" TEST_ALWAYS_FLAGS
+ 	}
++	if { $compat_alt_color == 0 } then {
++	    regsub -- "-fdiagnostics-color=never" $TEST_ALWAYS_FLAGS "" TEST_ALWAYS_FLAGS
++	}
+     }
+ }
+ 
+@@ -70,9 +73,11 @@ proc compat_setup_dfp { } {
+     global compat_same_alt
+     global compat_have_dfp
+     global compat_alt_caret
++    global compat_alt_color
+     global TEST_ALWAYS_FLAGS compat_save_TEST_ALWAYS_FLAGS
+ 
+     set compat_alt_caret 0
++    set compat_alt_color 0
+     set compat_save_TEST_ALWAYS_FLAGS $TEST_ALWAYS_FLAGS
+ 
+     verbose "compat_setup_dfp: $compat_use_alt $compat_same_alt" 2
+@@ -88,6 +93,10 @@ proc compat_setup_dfp { } {
+ 		int dummy; } "-fno-diagnostics-show-caret"] != 0 } {
+ 	    set compat_alt_caret 1
+ 	}
++	if { [check_no_compiler_messages_nocache compat_alt_has_color object {
++		int dummy; } "-fdiagnostics-color=never"] != 0 } {
++	    set compat_alt_color 1
++	}
+ 	compat-use-tst-compiler
+     }
+ 
+diff --git gcc-4.8/gcc/testsuite/lib/prune.exp gcc-4.8/gcc/testsuite/lib/prune.exp
+index c110fc6..7890608 100644
+--- gcc-4.8/gcc/testsuite/lib/prune.exp
++++ gcc-4.8/gcc/testsuite/lib/prune.exp
+@@ -19,7 +19,7 @@
+ if ![info exists TEST_ALWAYS_FLAGS] {
+     set TEST_ALWAYS_FLAGS ""
+ }
+-set TEST_ALWAYS_FLAGS "-fno-diagnostics-show-caret $TEST_ALWAYS_FLAGS"
++set TEST_ALWAYS_FLAGS "-fno-diagnostics-show-caret -fdiagnostics-color=never $TEST_ALWAYS_FLAGS"
+ 
+ proc prune_gcc_output { text } {
+     #send_user "Before:$text\n"
+diff --git gcc-4.8/gcc/toplev.c gcc-4.8/gcc/toplev.c
+index 7bced04..be81437 100644
+--- gcc-4.8/gcc/toplev.c
++++ gcc-4.8/gcc/toplev.c
+@@ -74,6 +74,7 @@ along with GCC; see the file COPYING3.  If not see
+ #include "gimple.h"
+ #include "tree-ssa-alias.h"
+ #include "plugin.h"
++#include "diagnostic-color.h"
+ 
+ #if defined(DBX_DEBUGGING_INFO) || defined(XCOFF_DEBUGGING_INFO)
+ #include "dbxout.h"
+@@ -1209,6 +1210,13 @@ process_options (void)
+ 
+   maximum_field_alignment = initial_max_fld_align * BITS_PER_UNIT;
+ 
++  /* Default to -fdiagnostics-color=auto if GCC_COLORS is in the environment,
++     otherwise default to -fdiagnostics-color=never.  */
++  if (!global_options_set.x_flag_diagnostics_show_color
++      && getenv ("GCC_COLORS"))
++    pp_show_color (global_dc->printer)
++      = colorize_init (DIAGNOSTICS_COLOR_AUTO);
++
+   /* Allow the front end to perform consistency checks and do further
+      initialization based on the command line options.  This hook also
+      sets the original filename if appropriate (e.g. foo.i -> foo.c)
+-- 
+1.8.3.2
+

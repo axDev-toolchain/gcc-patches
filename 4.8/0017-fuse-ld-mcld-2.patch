@@ -1,0 +1,36 @@
+From 04288e6d5db307539ffc86eff17dc7fd5a2eb973 Mon Sep 17 00:00:00 2001
+From: Andrew Hsieh <andrewhsieh@google.com>
+Date: Fri, 5 Apr 2013 09:09:56 +0800
+Subject: [PATCH] Add -fuse-ld=mcld
+
+GCC 4.8 differs from previous GCCs where the option is -fuse-ld=
+Also form Negative() circle for bfd/gold/mcld which is mutually
+exclusive
+
+Change-Id: I814c3380ad5199691e5a930f5d02696d283d19df
+---
+ gcc-4.8/gcc/common.opt | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git gcc-4.8/gcc/common.opt gcc-4.8/gcc/common.opt
+index bdbd3b6..2b051da 100644
+--- gcc-4.8/gcc/common.opt
++++ gcc-4.8/gcc/common.opt
+@@ -2184,9 +2184,13 @@ Common Negative(fuse-ld=gold)
+ Use the bfd linker instead of the default linker
+ 
+ fuse-ld=gold
+-Common Negative(fuse-ld=bfd)
++Common Negative(fuse-ld=mcld)
+ Use the gold linker instead of the default linker
+ 
++fuse-ld=mcld
++Common Negative(fuse-ld=bfd)
++Use the mcld linker instead of the default linker
++
+ fuse-linker-plugin
+ Common Undocumented
+ 
+-- 
+1.8.3.2
+

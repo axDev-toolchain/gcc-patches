@@ -1,0 +1,29 @@
+commit e830d092a4da90315a8c7bbe886582fc6357606d
+Author: Andrew Hsieh <andrewhsieh@google.com>
+Date:   Tue Apr 2 19:41:43 2013 +0800
+
+    [4.8] Enable _GLIBCXX_HAS_GTHREADS in GCC 4.8
+    
+    Fix a test in libstdc++/confiugre to include $glibcxx_thread_h instead
+    of gthr.h otherwise it will fail to detect gthread lib because the
+    new gthr.h only include gthr-default.h which doesn't exist in source
+    directory
+    
+    See issue http://code.google.com/p/android/issues/detail?id=41770
+    946c2a6b57ac7d3b2b656ac628bcb14a216ec635
+    
+    Change-Id: I13bd69f45ddee8b38055f0264c8aa484df0761d2
+
+diff --git gcc-4.8/libstdc++-v3/configure gcc-4.8/libstdc++-v3/configure
+index f40ddcf..faaa53d 100755
+--- gcc-4.8/libstdc++-v3/configure
++++ gcc-4.8/libstdc++-v3/configure
+@@ -72210,7 +72210,7 @@ $as_echo_n "checking for gthreads library... " >&6; }
+ 
+   cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+ /* end confdefs.h.  */
+-#include "gthr.h"
++#include "gthr-$target_thread_file.h"
+ int
+ main ()
+ {
